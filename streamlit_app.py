@@ -1,66 +1,131 @@
-import altair as alt
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.feature_selection import chi2
+from sklearn.preprocessing import LabelEncoder
 
-# Show the page title and description.
-st.set_page_config(page_title="Movies dataset", page_icon="🎬")
-st.title("🎬 Movies dataset")
-st.write(
-    """
-    This app visualizes data from [The Movie Database (TMDB)](https://www.kaggle.com/datasets/tmdb/tmdb-movie-metadata).
-    It shows which movie genre performed best at the box office over the years. Just 
-    click on the widgets below to explore!
-    """
-)
+# Sample data based on the provided graph
+features = ['Gender', 'Married', 'Dependents', 'Education', 'Self_Employed', 'Credit_History', 'Property_Area']
+chi2_scores = [0.5, 1.0, 0.2, 3.5, 0.1, 24.0, 0.3]
+p_values = [0.6, 0.7, 0.8, 0.1, 0.7, 0.01, 0.75]
 
+# Create a DataFrame
+data = pd.DataFrame({
+    'Feature': features,
+    'Chi-Square Score': chi2_scores,
+    'P-Value': p_values
+})
 
-# Load the data from a CSV. We're caching this so it doesn't reload every time the app
-# reruns (e.g. if the user interacts with the widgets).
-@st.cache_data
-def load_data():
-    df = pd.read_csv("data/movies_genres_summary.csv")
+# Streamlit app
+st.title("Chi-Square Test Interactive App")
+
+st.write("""
+### Explore Chi-Square Scores and P-Values
+Click on a feature to see its chi-square score and p-value.
+""")
+
+# Sidebar for feature selection with a multiselect option
+selected_features = st.sidebar.multiselect("Select features", features, default=features)
+
+# Filter data based on selected features
+filtered_data = data[data['Feature'].isin(selected_features)]
+
+# Display selected features' chi-square scores and p-values in a table
+st.write("**Selected Features Data**")
+st.dataframe(filtered_data)
+
+# Plotting the bar charts with tooltips
+fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+
+# Chi-Square Scores plot
+ax[0].bar(filtered_data['Feature'], filtered_data['Chi-Square Score'], color='skyblue')
+ax[0].set_title('Chi-Square Scores')
+ax[0].set_ylabel('Score')
+ax[0].tick_params(axis='x', rotation=45)
+
+# P-Values plot
+ax[1].bar(filtered_data['Feature'], filtered_data['P-Value'], color='salmon')
+ax[1].set_title('P-Values')
+ax[1].set_ylabel('P-Value')
+ax[1].tick_params(axis='x', rotation=45)
+
+st.pyplot(fig)
+
+# Function to perform label encoding
+def label_encode(df):
+    le = LabelEncoder()
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            df[col] = le.fit_transform(df[col])
     return df
 
+# Streamlit app
+st.title("Chi-Square Test Interactive App")
 
-df = load_data()
+st.write("""
+### Upload Your Dataset
+Upload a CSV file or provide a link to perform chi-square analysis.
+""")
 
-# Show a multiselect widget with the genres using `st.multiselect`.
-genres = st.multiselect(
-    "Genres",
-    df.genre.unique(),
-    ["Action", "Adventure", "Biography", "Comedy", "Drama", "Horror"],
-)
+# File uploader
+uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
 
-# Show a slider widget with the years using `st.slider`.
-years = st.slider("Years", 1986, 2006, (2000, 2016))
+# URL input
+url_input = st.text_input("Or enter a URL to a CSV file")
 
-# Filter the dataframe based on the widget input and reshape it.
-df_filtered = df[(df["genre"].isin(genres)) & (df["year"].between(years[0], years[1]))]
-df_reshaped = df_filtered.pivot_table(
-    index="year", columns="genre", values="gross", aggfunc="sum", fill_value=0
-)
-df_reshaped = df_reshaped.sort_values(by="year", ascending=False)
+# Load data from file or URL
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+elif url_input:
+    try:
+        df = pd.read_csv(url_input)
+    except Exception as e:
+        st.error(f"Error loading data from URL: {e}")
+        df = None
+else:
+    df = None
 
+if df is not None:
+    st.write("### Dataset Preview")
+    st.dataframe(df.head())
 
-# Display the data as a table using `st.dataframe`.
-st.dataframe(
-    df_reshaped,
-    use_container_width=True,
-    column_config={"year": st.column_config.TextColumn("Year")},
-)
+    # Select columns for chi-square calculation
+    target_column = st.selectbox("Select the target column", df.columns)
+    feature_columns = st.multiselect("Select feature columns", [col for col in df.columns if col != target_column])
 
-# Display the data as an Altair chart using `st.altair_chart`.
-df_chart = pd.melt(
-    df_reshaped.reset_index(), id_vars="year", var_name="genre", value_name="gross"
-)
-chart = (
-    alt.Chart(df_chart)
-    .mark_line()
-    .encode(
-        x=alt.X("year:N", title="Year"),
-        y=alt.Y("gross:Q", title="Gross earnings ($)"),
-        color="genre:N",
-    )
-    .properties(height=320)
-)
-st.altair_chart(chart, use_container_width=True)
+    if target_column and feature_columns:
+        # Encode categorical variables
+        df_encoded = label_encode(df[[target_column] + feature_columns])
+
+        # Perform chi-square test
+        X = df_encoded[feature_columns]
+        y = df_encoded[target_column]
+        chi2_scores, p_values = chi2(X, y)
+
+        # Create DataFrame for results
+        results_df = pd.DataFrame({
+            'Feature': feature_columns,
+            'Chi-Square Score': chi2_scores,
+            'P-Value': p_values
+        })
+
+        st.write("### Chi-Square Analysis Results")
+        st.dataframe(results_df)
+
+        # Plotting the bar charts
+        fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+
+        # Chi-Square Scores plot
+        ax[0].bar(results_df['Feature'], results_df['Chi-Square Score'], color='skyblue')
+        ax[0].set_title('Chi-Square Scores')
+        ax[0].set_ylabel('Score')
+        ax[0].tick_params(axis='x', rotation=45)
+
+        # P-Values plot
+        ax[1].bar(results_df['Feature'], results_df['P-Value'], color='salmon')
+        ax[1].set_title('P-Values')
+        ax[1].set_ylabel('P-Value')
+        ax[1].tick_params(axis='x', rotation=45)
+
+        st.pyplot(fig)
